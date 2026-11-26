@@ -163,3 +163,44 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    private fun watchLoginReturn() {
+        lifecycleScope.launch {
+            MyspotiRuntime.host.url.collect { url ->
+                val playerPrefix = "https://open" + "." + "spotify" + "." + "com"
+                val backOnPlayer = url.startsWith(playerPrefix) && !url.contains("/login")
+                if (!(showingLogin && backOnPlayer)) return@collect
+                loginWait?.cancel()
+                loginWait = launch {
+                    var waited = 0L
+                    while (waited < SESSION_WAIT_MS) {
+                        if (runCatching { MyspotiRuntime.isSignedIn() }.getOrDefault(false)) {
+                            android.util.Log.d(LOG, "session established: player shown")
+                            hideLogin()
+                            return@launch
+                        }
+                        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) waited += 500
+                        kotlinx.coroutines.delay(500)
+                    }
+                    android.util.Log.d(LOG, "no session ${SESSION_WAIT_MS / 1000}s after the player came back: sign-in page restored")
+                    if (!showingLogin) showLogin() else MyspotiRuntime.host.openLogin()
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!showingLogin) return
+        lifecycleScope.launch {
+            val playerPrefix = "https://open" + "." + "spotify" + "." + "com"
+            if (MyspotiRuntime.awaitSignedIn(1_500)) {
+                android.util.Log.d(LOG, "back with a session: player shown")
+                hideLogin()
+            } else if (MyspotiRuntime.host.url.value.let { it.startsWith(playerPrefix) && !it.contains("/login") }) {
+                android.util.Log.d(LOG, "back without a session: sign-in page restored")
+                MyspotiRuntime.host.openLogin()
+            }
+        }
+    }
+
