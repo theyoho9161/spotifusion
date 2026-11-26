@@ -189,7 +189,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume() {
+  
+        override fun onResume() {
         super.onResume()
         if (!showingLogin) return
         lifecycleScope.launch {
@@ -204,3 +205,77 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun watchSession() {
+        val api = MyspotiRuntime.spotify
+        lifecycleScope.launch {
+            combine(api.ready, MyspotiRuntime.loginRequired) { ready, login -> ready to login }.collect { (ready, login) ->
+                when {
+                    login && !showingLogin && signedIn -> showLogin()
+                    ready && !login -> {
+                        val user = runCatching { MyspotiRuntime.isSignedIn() }.getOrDefault(false)
+                        if (user) {
+                            if (com.music.spotui.di.SessionActions.signedOut.value) {
+                                com.music.spotui.di.SessionActions.signedIn()
+                                prefs.edit().putBoolean("LoggedIn", true).apply()
+                                MyspotiRuntime.host.attach(root, visible = false)
+                                startActivity(Intent(this@MainActivity, MainActivity::class.java)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+                                finish()
+                                return@collect
+                            }
+                            if (!signedIn) {
+                                prefs.edit().putBoolean("LoggedIn", true).apply()
+                                signedIn = true
+                            }
+                            connecting = false
+                            if (showingLogin) hideLogin()
+                        } else if (signedIn) {
+                            android.util.Log.d(LOG, "anonymous token while the app thought it was signed in: back to the sign-in page")
+                            prefs.edit().putBoolean("LoggedIn", false).apply()
+                            signedIn = false
+                            connecting = false
+                            showLogin()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handle(intent: Intent?) {
+        intent ?: return
+        if (intent.data?.scheme == "spotiflac" && intent.data?.host == "session-grant") {
+            com.music.spotui.lossless.ZarzSession.grants.value = intent.data.toString()
+            return
+        }
+        when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                val uri = spotifyUri(intent.data?.toString() ?: return) ?: return
+                lifecycleScope.launch {
+                    MyspotiRuntime.api.ready.first { it }
+                    runCatching { MyspotiRuntime.api.player.play(uri) }
+                }
+            }
+            android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> {
+                val query = intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty()
+                if (query.isNotBlank()) lifecycleScope.launch { AutoBrowser.playFromSearch(query) }
+            }
+        }
+    }
+
+    private fun spotifyUri(link: String): String? {
+        val m = Regex("(?:open|www|play)\\.spotify\\.com/(?:intl-[a-z-]+/)?(track|album|playlist|artist|show|episode)/([A-Za-z0-9]{22})").find(link) ?: return null
+        return "spotify:${m.groupValues.get(1)}:${m.groupValues.get(2)}"
+    }
+}
+
+/** Shown between Spotify's login page and the first screen. */
+@androidx.compose.runtime.Composable
+private fun ConnectingScreen() {
+    androidx.compose.foundation.layout.Box(
+        androidx.compose.ui.Modifier.fillMaxSize().background(com.music.spotui.ui.theme.AppBackground),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        androidx.compose.material3.CircularProgressIndicator(color = com.music.spotui.ui.theme.AppAccent)
+    }
+}
