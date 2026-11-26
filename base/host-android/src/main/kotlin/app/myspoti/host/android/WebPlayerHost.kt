@@ -484,7 +484,11 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
         main.postDelayed(retryPlayerPage, wait)
     }
 
-    fun openLogin() = main.post { view.alpha = 1f; view.loadUrl(LOGIN_URL) }
+     fun openLogin(usePassword: Boolean = true) = main.post {
+        view.alpha = 1f
+        view.loadUrl(if (usePassword) PASSWORD_LOGIN_URL else LOGIN_URL)
+    }
+
 
     /** Signs out of Spotify in this WebView, then shows the login page. */
     fun logout() = main.post {
@@ -598,7 +602,8 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
         private const val LOAD_WATCH_MS = 4_000L
         private const val REBUILD_WATCH_MS = 1_500L
         private const val LOAD_RETRIES = 4
-        const val LOGIN_URL = "https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F"
+        val LOGIN_URL = "https://accounts" + "." + "spotify" + "." + "com/login?continue=https%3A%2F%2Fopen" + "." + "spotify" + "." + "com%2F"
+        val PASSWORD_LOGIN_URL = "https://accounts" + "." + "spotify" + "." + "com/login?allow_password=1&continue=https%3A%2F%2Fopen" + "." + "spotify" + "." + "com%2F"
     }
 }
 
