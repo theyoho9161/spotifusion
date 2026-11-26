@@ -81,7 +81,10 @@ class MainActivity : AppCompatActivity() {
                             )
                             signedIn -> App()
                             connecting -> ConnectingScreen()
-                            else -> WelcomeScreen(onLogin = { showLogin() })
+                            else -> WelcomeScreen(
+                                onLogin = { showLogin(usePassword = false) },
+                                onPasswordLogin = { showLogin(usePassword = true) },
+                            )
                         }
                         // "Ask each time": the download quality question, above every screen.
                         com.music.spotui.ui.components.DownloadAskHost()
@@ -137,10 +140,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Spotify's login page, full screen, until the Web Player comes back signed in. */
-    private fun showLogin() {
+    private fun showLogin(usePassword: Boolean = true) {
         showingLogin = true
         MyspotiRuntime.host.attach(root, visible = true)
-        MyspotiRuntime.host.openLogin()
+        MyspotiRuntime.host.openLogin(usePassword)
     }
 
     private fun hideLogin() {
@@ -160,150 +163,3 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    /**
-     * Spotify sent the user back to the player: the page is hidden now, the session follows.
-     *
-     * The address is not a session. The page comes back to open.spotify.com while its token is
-     * still anonymous when the login never finished (the e-mail step that hangs — the reported
-     * "stuck on the e-mail screen"), and hiding the page on that alone left a spinner that never
-     * stopped. The return is bounded: no token after [SESSION_WAIT_MS], the login page comes back.
-     */
-    private fun watchLoginReturn() {
-        lifecycleScope.launch {
-            MyspotiRuntime.host.url.collect { url ->
-                val backOnPlayer = url.startsWith("https://open.spotify.com") && !url.contains("/login")
-                if (!(showingLogin && backOnPlayer)) return@collect
-                // The address is not a session — and it comes back to open.spotify.com as soon as the
-                // user leaves the app to read the sign-in e-mail. Hiding the page here showed an
-                // anonymous player: an app that looked signed in with nothing playable (reported).
-                // The login page therefore stays in FRONT until a real token exists.
-                loginWait?.cancel()
-                loginWait = launch {
-                    var waited = 0L
-                    while (waited < SESSION_WAIT_MS) {
-                        if (runCatching { MyspotiRuntime.isSignedIn() }.getOrDefault(false)) {
-                            android.util.Log.d(LOG, "session established: player shown")
-                            hideLogin()
-                            return@launch
-                        }
-                        // The countdown only runs while the user is looking at the app: away to read
-                        // the e-mail, the sign-in page must not be reset under them.
-                        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) waited += 500
-                        kotlinx.coroutines.delay(500)
-                    }
-                    android.util.Log.d(LOG, "no session ${SESSION_WAIT_MS / 1000}s after the player came back: sign-in page restored")
-                    // The page may now be the anonymous player: send it back to the e-mail step so the
-                    // user is not left where nothing plays.
-                    if (!showingLogin) showLogin() else MyspotiRuntime.host.openLogin()
-                }
-            }
-        }
-    }
-
-    /**
-     * Back from the e-mail app: the session may have been established while away, or the page may
-     * have reloaded into the anonymous player. Only the token decides — never the address.
-     */
-    override fun onResume() {
-        super.onResume()
-        if (!showingLogin) return
-        lifecycleScope.launch {
-            if (MyspotiRuntime.awaitSignedIn(1_500)) {
-                android.util.Log.d(LOG, "back with a session: player shown")
-                hideLogin()
-            } else if (MyspotiRuntime.host.url.value.let { it.startsWith("https://open.spotify.com") && !it.contains("/login") }) {
-                android.util.Log.d(LOG, "back without a session: sign-in page restored")
-                MyspotiRuntime.host.openLogin()
-            }
-        }
-    }
-
-    /**
-     * Signed in = the Web Player is ready with a user token. A Spotify login page while
-     * signed in (expired session) brings the page back to the front.
-     */
-    private fun watchSession() {
-        val api = MyspotiRuntime.spotify
-        lifecycleScope.launch {
-            combine(api.ready, MyspotiRuntime.loginRequired) { ready, login -> ready to login }.collect { (ready, login) ->
-                when {
-                    login && !showingLogin && signedIn -> showLogin()
-                    ready && !login -> {
-                        val user = runCatching { MyspotiRuntime.isSignedIn() }.getOrDefault(false)
-                        if (user) {
-                            if (com.music.spotui.di.SessionActions.signedOut.value) {
-                                // Signed in again after a logout, maybe as someone else: start the
-                                // screens over (a new activity also drops their view models).
-                                com.music.spotui.di.SessionActions.signedIn()
-                                prefs.edit().putBoolean("LoggedIn", true).apply()
-                                MyspotiRuntime.host.attach(root, visible = false)
-                                startActivity(Intent(this@MainActivity, MainActivity::class.java)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-                                finish()
-                                return@collect
-                            }
-                            if (!signedIn) {
-                                prefs.edit().putBoolean("LoggedIn", true).apply()
-                                signedIn = true
-                            }
-                            connecting = false
-                            if (showingLogin) hideLogin()
-                        } else if (signedIn) {
-                            // The pref said "signed in", the token says anonymous: only the token
-                            // counts. This is what left the app on its full UI (or on Spotify's
-                            // anonymous page) with nothing playable — reported after leaving the app
-                            // to read the sign-in e-mail, where the session never completed.
-                            android.util.Log.d(LOG, "anonymous token while the app thought it was signed in: back to the sign-in page")
-                            prefs.edit().putBoolean("LoggedIn", false).apply()
-                            signedIn = false
-                            connecting = false
-                            showLogin()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-
-    /** Spotify links (open.spotify.com/...) play their item; voice search plays its best match. */
-    private fun handle(intent: Intent?) {
-        intent ?: return
-        // The SpotiFLAC verification's return (spotiflac://session-grant?grant=…&state=…).
-        if (intent.data?.scheme == "spotiflac" && intent.data?.host == "session-grant") {
-            com.music.spotui.lossless.ZarzSession.grants.value = intent.data.toString()
-            return
-        }
-        when (intent.action) {
-            Intent.ACTION_VIEW -> {
-                val uri = spotifyUri(intent.data?.toString() ?: return) ?: return
-                lifecycleScope.launch {
-                    MyspotiRuntime.api.ready.first { it }
-                    runCatching { MyspotiRuntime.api.player.play(uri) }
-                }
-            }
-            android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH -> {
-                val query = intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty()
-                if (query.isNotBlank()) lifecycleScope.launch { AutoBrowser.playFromSearch(query) }
-            }
-        }
-    }
-
-    /** `https://open.spotify.com/intl-fr/album/{id}?si=…` -> `spotify:album:{id}`. */
-    private fun spotifyUri(link: String): String? {
-        val m = Regex("(?:open|www|play)\\.spotify\\.com/(?:intl-[a-z-]+/)?(track|album|playlist|artist|show|episode)/([A-Za-z0-9]{22})").find(link) ?: return null
-        return "spotify:${m.groupValues[1]}:${m.groupValues[2]}"
-    }
-}
-
-/** Shown between Spotify's login page and the first screen. */
-@androidx.compose.runtime.Composable
-private fun ConnectingScreen() {
-    androidx.compose.foundation.layout.Box(
-        androidx.compose.ui.Modifier.fillMaxSize().background(com.music.spotui.ui.theme.AppBackground),
-        contentAlignment = androidx.compose.ui.Alignment.Center,
-    ) {
-        androidx.compose.material3.CircularProgressIndicator(color = com.music.spotui.ui.theme.AppAccent)
-    }
-}
