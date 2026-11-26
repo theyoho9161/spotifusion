@@ -1,7 +1,9 @@
 package com.music.spotui.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,11 +35,11 @@ import com.music.spotui.ui.theme.ScPrimary
 import com.music.spotui.ui.theme.ScSecondary
 import com.music.spotui.ui.theme.ScTint
 
-/**
- * 1:1 Jetpack Compose port of redretep/spotify-clone components/Login/Login.tsx & styles.ts.
- */
 @Composable
-fun WelcomeScreen(onLogin: () -> Unit) {
+fun WelcomeScreen(
+    onLogin: () -> Unit,
+    onPasswordLogin: () -> Unit = onLogin,
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -79,13 +81,13 @@ fun WelcomeScreen(onLogin: () -> Unit) {
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .pressable(0.96f, onClick = onLogin)
+                    .pressable(0.96f, onClick = onPasswordLogin)
                     .clip(CircleShape)
                     .background(ScTint)
                     .padding(vertical = 18.dp),
             ) {
                 Text(
-                    text = "Sign in",
+                    text = "Sign in with password",
                     color = ScSecondary,
                     fontFamily = AppSans,
                     fontWeight = FontWeight.SemiBold,
@@ -93,7 +95,26 @@ fun WelcomeScreen(onLogin: () -> Unit) {
                     textAlign = TextAlign.Center,
                 )
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pressable(0.96f, onClick = onLogin)
+                    .clip(CircleShape)
+                    .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)), CircleShape)
+                    .padding(vertical = 15.dp),
+            ) {
+                Text(
+                    text = "Sign in without password",
+                    color = Color.White,
+                    fontFamily = AppSans,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
             Text(
                 text = "NOTE: You won't be sharing your credentials",
                 color = ScGrey,
@@ -102,7 +123,7 @@ fun WelcomeScreen(onLogin: () -> Unit) {
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(150.dp))
+            Spacer(Modifier.height(120.dp))
         }
     }
 }
